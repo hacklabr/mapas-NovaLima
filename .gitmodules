@@ -13,3 +13,6 @@
 [submodule "plugins/SpamDetector"]
 	path = plugins/SpamDetector
 	url = https://github.com/mapasculturais/plugin-SpamDetector.git
+[submodule "plugins/MapasBlame"]
+	path = plugins/MapasBlame
+	url = git@github.com:mapasculturais/plugin-MapasBlame.git

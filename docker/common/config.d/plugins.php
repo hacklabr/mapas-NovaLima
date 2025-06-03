@@ -7,6 +7,14 @@ return [
         'Analytics',
         'AdminLoginAsUser',
         'Accessibility',
-        'SpamDetector'
+        'SpamDetector',
+        'MapasBlame' => [
+            'namespace' => 'MapasBlame',
+            'config' => [
+                'request.logData.PATCH' => function ($data) {
+                    return $data;
+                },
+            ]
+        ],
     ]
 ];
