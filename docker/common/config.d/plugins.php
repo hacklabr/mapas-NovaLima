@@ -7,5 +7,6 @@ return [
         'Analytics',
         'AdminLoginAsUser',
         'Accessibility',
+        'SpamDetector'
     ]
 ];
