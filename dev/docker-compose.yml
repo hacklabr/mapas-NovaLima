@@ -20,6 +20,7 @@ services:
       - ./config.d:/var/www/config/local.d
 
       # themes and plugins
+      - ../themes/MapasNovaLima:/var/www/src/themes/MapasNovaLima
       - ../plugins/SamplePlugin:/var/www/src/plugins/SamplePlugin
       - ../plugins/MultipleLocalAuth:/var/www/src/plugins/MultipleLocalAuth
       - ../plugins/Analytics:/var/www/src/plugins/Analytics
