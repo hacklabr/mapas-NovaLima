@@ -8,7 +8,7 @@ fi
 echo "EDITE ESTE ARQUIVO E DEFINA AS VARIÁVEIS domain, email e staging"
 
 # Domínio da instalação
-domain=(mapacultura.novalima.mg.gov.br)
+domain=(mapacultural.novalima.mg.gov.br)
 
 # Informe um e-mail válido
 email="erlei.biazzio@hacklab.com.br"
