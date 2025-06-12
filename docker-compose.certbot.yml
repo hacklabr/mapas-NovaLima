@@ -7,6 +7,7 @@ services:
      - ./docker-data/certbot/conf:/etc/letsencrypt
      - ./docker-data/certbot/www:/usr/share/nginx/html/
     ports:
+     - "80:80"
      - "4080:80"
     
   certbot:
