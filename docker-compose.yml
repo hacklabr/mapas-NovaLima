@@ -42,7 +42,6 @@ services:
 
       - ./docker/production/config.d:/var/www/config/prod.d
     links:
-      - db
       - redis
       - sessions
     environment:
@@ -50,7 +49,6 @@ services:
       - SESSIONS_SAVE_PATH=tcp://sessions:6379
 
     depends_on:
-      - db
       - redis
       - sessions
 
@@ -66,16 +64,16 @@ services:
     volumes:
       - ./docker-data/sessions:/data
 
-  db:
-    image: postgis/postgis:14-master
-    restart: unless-stopped
-    environment:
-      - POSTGRES_PASSWORD=mapas
-      - POSTGRES_USER=mapas
-      - POSTGRES_DB=mapas
-    volumes:
-      - ./docker/db:/docker-entrypoint-initdb.d
-      - ./docker-data/db-data:/var/lib/postgresql/data
+  # db:
+  #   image: postgis/postgis:14-master
+  #   restart: unless-stopped
+  #   environment:
+  #     - POSTGRES_PASSWORD=mapas
+  #     - POSTGRES_USER=mapas
+  #     - POSTGRES_DB=mapas
+  #   volumes:
+  #     - ./docker/db:/docker-entrypoint-initdb.d
+  #     - ./docker-data/db-data:/var/lib/postgresql/data
     
 
 ## Em ambiente de homologação pode ser uma boa ideia utilizar o mailhog para testar 
