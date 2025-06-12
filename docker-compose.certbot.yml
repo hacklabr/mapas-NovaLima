@@ -8,7 +8,6 @@ services:
      - ./docker-data/certbot/www:/usr/share/nginx/html/
     ports:
      - "80:80"
-     - "4080:80"
     
   certbot:
     image: certbot/certbot
