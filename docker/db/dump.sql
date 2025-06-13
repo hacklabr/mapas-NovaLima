@@ -2,8 +2,8 @@
 -- PostgreSQL database dump
 --
 
--- Dumped from database version 14.8 (Debian 14.8-1.pgdg110+1)
--- Dumped by pg_dump version 14.8 (Debian 14.8-1.pgdg110+1)
+-- Dumped from database version 14.9 (Debian 14.9-1.pgdg110+1)
+-- Dumped by pg_dump version 14.9 (Debian 14.9-1.pgdg110+1)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -136,20 +136,20 @@ ALTER DOMAIN public.frequency OWNER TO mapas;
 
 CREATE TYPE public.object_type AS ENUM (
     'MapasCulturais\Entities\Agent',
-    'MapasCulturais\Entities\ChatMessage',
-    'MapasCulturais\Entities\ChatThread',
     'MapasCulturais\Entities\EvaluationMethodConfiguration',
     'MapasCulturais\Entities\Event',
     'MapasCulturais\Entities\Notification',
     'MapasCulturais\Entities\Opportunity',
     'MapasCulturais\Entities\Project',
     'MapasCulturais\Entities\Registration',
-    'MapasCulturais\Entities\RegistrationEvaluation',
     'MapasCulturais\Entities\RegistrationFileConfiguration',
     'MapasCulturais\Entities\Request',
     'MapasCulturais\Entities\Seal',
     'MapasCulturais\Entities\Space',
     'MapasCulturais\Entities\Subsite',
+    'MapasCulturais\Entities\ChatMessage',
+    'MapasCulturais\Entities\ChatThread',
+    'MapasCulturais\Entities\RegistrationEvaluation',
     'MapasCulturais\Entities\User',
     'UserManagement\Entities\SystemRole'
 );
@@ -179,7 +179,6 @@ CREATE TYPE public.permission_action AS ENUM (
     'modify',
     'modifyRegistrationFields',
     'modifyValuers',
-    'post',
     'publish',
     'publishRegistrations',
     'register',
@@ -205,7 +204,13 @@ CREATE TYPE public.permission_action AS ENUM (
     'changeUserProfile',
     'deleteAccount',
     'evaluateOnTime',
+    'manageEvaluationCommittee',
+    'post',
+    'sendEditableFields',
+    'support',
     'unarchive',
+    'modifyReadonlyData',
+    'applySeal',
     'changePassword'
 );
 
@@ -270,6 +275,48 @@ CREATE FUNCTION public.fn_clean_orphans() RETURNS trigger
 
 
 ALTER FUNCTION public.fn_clean_orphans() OWNER TO mapas;
+
+--
+-- Name: fn_propagate_opportunity_insert(); Type: FUNCTION; Schema: public; Owner: mapas
+--
+
+CREATE FUNCTION public.fn_propagate_opportunity_insert() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+                    BEGIN
+                        NEW.registration_ranges = (SELECT coalesce((SELECT registration_ranges FROM opportunity WHERE id = NEW.parent_id)::json, '[]'::json));
+                        NEW.registration_categories = (SELECT coalesce((SELECT registration_categories FROM opportunity WHERE id = NEW.parent_id), '[]'));
+                        NEW.registration_proponent_types = (SELECT coalesce((SELECT registration_proponent_types FROM opportunity WHERE id = NEW.parent_id)::json, '[]'::json));
+                        RETURN NEW;
+                    END; $$;
+
+
+ALTER FUNCTION public.fn_propagate_opportunity_insert() OWNER TO mapas;
+
+--
+-- Name: fn_propagate_opportunity_update(); Type: FUNCTION; Schema: public; Owner: mapas
+--
+
+CREATE FUNCTION public.fn_propagate_opportunity_update() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+                    BEGIN
+                        UPDATE opportunity
+                        SET 
+                            registration_ranges = NEW.registration_ranges,
+                            registration_categories = NEW.registration_categories,
+                            registration_proponent_types = NEW.registration_proponent_types
+                        WHERE parent_id = OLD.id
+                        AND (
+                            registration_ranges::jsonb IS DISTINCT FROM NEW.registration_ranges::jsonb OR
+                            registration_categories::jsonb IS DISTINCT FROM NEW.registration_categories::jsonb OR
+                            registration_proponent_types::jsonb IS DISTINCT FROM NEW.registration_proponent_types::jsonb
+                        );
+                        RETURN NEW;
+                    END; $$;
+
+
+ALTER FUNCTION public.fn_propagate_opportunity_update() OWNER TO mapas;
 
 --
 -- Name: generate_recurrences(interval, date, date, date, date, integer, integer, integer); Type: FUNCTION; Schema: public; Owner: mapas
@@ -885,6 +932,82 @@ ALTER SEQUENCE public.agent_relation_id_seq OWNED BY public.agent_relation.id;
 
 
 --
+-- Name: blame_log_id_seq; Type: SEQUENCE; Schema: public; Owner: mapas
+--
+
+CREATE SEQUENCE public.blame_log_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.blame_log_id_seq OWNER TO mapas;
+
+--
+-- Name: blame_log; Type: TABLE; Schema: public; Owner: mapas
+--
+
+CREATE TABLE public.blame_log (
+    id integer DEFAULT nextval('public.blame_log_id_seq'::regclass) NOT NULL,
+    request_id character(13) NOT NULL,
+    action character varying(2048) NOT NULL,
+    metadata json DEFAULT '{}'::json NOT NULL,
+    created_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.blame_log OWNER TO mapas;
+
+--
+-- Name: blame_request; Type: TABLE; Schema: public; Owner: mapas
+--
+
+CREATE TABLE public.blame_request (
+    id character(13) NOT NULL,
+    ip character varying(45) NOT NULL,
+    session_id character(32) NOT NULL,
+    user_id integer,
+    user_agent character varying(1024),
+    user_browser_name character varying(512),
+    user_browser_version character varying(512),
+    user_os character varying(512),
+    user_device character varying(512),
+    metadata json DEFAULT '{}'::json NOT NULL,
+    created_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.blame_request OWNER TO mapas;
+
+--
+-- Name: blame; Type: VIEW; Schema: public; Owner: mapas
+--
+
+CREATE VIEW public.blame AS
+ SELECT bl.id AS log_id,
+    br.id AS request_id,
+    br.ip,
+    br.session_id,
+    br.user_id,
+    bl.action,
+    br.user_agent,
+    br.user_browser_name,
+    br.user_browser_version,
+    br.user_os,
+    br.user_device,
+    br.metadata AS request_metadata,
+    bl.metadata AS log_metadata,
+    br.created_at AS request_ts,
+    bl.created_at AS log_ts
+   FROM (public.blame_request br
+     LEFT JOIN public.blame_log bl ON ((bl.request_id = br.id)));
+
+
+ALTER TABLE public.blame OWNER TO mapas;
+
+--
 -- Name: chat_message; Type: TABLE; Schema: public; Owner: mapas
 --
 
@@ -1061,20 +1184,6 @@ ALTER SEQUENCE public.evaluation_method_configuration_id_seq OWNED BY public.eva
 
 
 --
--- Name: evaluationmethodconfiguration_meta; Type: TABLE; Schema: public; Owner: mapas
---
-
-CREATE TABLE public.evaluationmethodconfiguration_meta (
-    id integer NOT NULL,
-    object_id integer NOT NULL,
-    key character varying(255) NOT NULL,
-    value text
-);
-
-
-ALTER TABLE public.evaluationmethodconfiguration_meta OWNER TO mapas;
-
---
 -- Name: evaluationmethodconfiguration_meta_id_seq; Type: SEQUENCE; Schema: public; Owner: mapas
 --
 
@@ -1087,6 +1196,20 @@ CREATE SEQUENCE public.evaluationmethodconfiguration_meta_id_seq
 
 
 ALTER TABLE public.evaluationmethodconfiguration_meta_id_seq OWNER TO mapas;
+
+--
+-- Name: evaluationmethodconfiguration_meta; Type: TABLE; Schema: public; Owner: mapas
+--
+
+CREATE TABLE public.evaluationmethodconfiguration_meta (
+    id integer DEFAULT nextval('public.evaluationmethodconfiguration_meta_id_seq'::regclass) NOT NULL,
+    object_id integer NOT NULL,
+    key character varying(255) NOT NULL,
+    value text
+);
+
+
+ALTER TABLE public.evaluationmethodconfiguration_meta OWNER TO mapas;
 
 --
 -- Name: pcache_id_seq; Type: SEQUENCE; Schema: public; Owner: mapas
@@ -1135,7 +1258,14 @@ CREATE TABLE public.registration (
     consolidated_result character varying(255) DEFAULT NULL::character varying,
     number character varying(24),
     valuers_exceptions_list text DEFAULT '{"include": [], "exclude": []}'::text NOT NULL,
-    space_data text
+    space_data text,
+    proponent_type character varying(255),
+    range character varying(255),
+    score double precision,
+    eligible boolean,
+    editable_until timestamp without time zone,
+    edit_sent_timestamp timestamp without time zone,
+    editable_fields json
 );
 
 
@@ -1153,7 +1283,8 @@ CREATE TABLE public.registration_evaluation (
     evaluation_data text NOT NULL,
     status smallint,
     create_timestamp timestamp without time zone DEFAULT now() NOT NULL,
-    update_timestamp timestamp without time zone
+    update_timestamp timestamp without time zone,
+    sent_timestamp timestamp without time zone
 );
 
 
@@ -1199,10 +1330,10 @@ COMMENT ON COLUMN public.usr.auth_provider IS '1=openid';
 
 
 --
--- Name: evaluations; Type: VIEW; Schema: public; Owner: mapas
+-- Name: evaluations; Type: MATERIALIZED VIEW; Schema: public; Owner: mapas
 --
 
-CREATE VIEW public.evaluations AS
+CREATE MATERIALIZED VIEW public.evaluations AS
  SELECT evaluations_view.registration_id,
     evaluations_view.registration_sent_timestamp,
     evaluations_view.registration_number,
@@ -1246,7 +1377,8 @@ CREATE VIEW public.evaluations AS
              JOIN public.usr u2 ON ((u2.id = p2.user_id)))
              JOIN public.evaluation_method_configuration emc ON ((emc.opportunity_id = r2.opportunity_id)))
           WHERE (r2.status > 0)) evaluations_view
-  GROUP BY evaluations_view.registration_id, evaluations_view.registration_sent_timestamp, evaluations_view.registration_number, evaluations_view.registration_category, evaluations_view.registration_agent_id, evaluations_view.valuer_user_id, evaluations_view.valuer_agent_id, evaluations_view.opportunity_id;
+  GROUP BY evaluations_view.registration_id, evaluations_view.registration_sent_timestamp, evaluations_view.registration_number, evaluations_view.registration_category, evaluations_view.registration_agent_id, evaluations_view.valuer_user_id, evaluations_view.valuer_agent_id, evaluations_view.opportunity_id
+  WITH NO DATA;
 
 
 ALTER TABLE public.evaluations OWNER TO mapas;
@@ -1517,7 +1649,7 @@ CREATE TABLE public.geo_division (
     name character varying(128) NOT NULL,
     geom public.geometry,
     CONSTRAINT enforce_dims_geom CHECK ((public.st_ndims(geom) = 2)),
-    CONSTRAINT enforce_geotype_geom CHECK (((public.geometrytype(geom) = 'MULTIPOLYGON'::text) OR (geom IS NULL))),
+    CONSTRAINT enforce_geotype_geom CHECK (((public.geometrytype(geom) = 'MULTIPOLYGON'::text) OR (public.geometrytype(geom) = 'POLYGON'::text) OR (geom IS NULL))),
     CONSTRAINT enforce_srid_geom CHECK ((public.st_srid(geom) = 4326))
 );
 
@@ -1538,7 +1670,9 @@ CREATE TABLE public.job (
     next_execution_timestamp timestamp(0) without time zone NOT NULL,
     last_execution_timestamp timestamp(0) without time zone DEFAULT NULL::timestamp without time zone,
     metadata json NOT NULL,
-    status smallint NOT NULL
+    status smallint NOT NULL,
+    subsite_id integer,
+    user_id integer
 );
 
 
@@ -1710,7 +1844,9 @@ CREATE TABLE public.opportunity (
     object_id integer NOT NULL,
     avaliable_evaluation_fields json,
     publish_timestamp timestamp without time zone,
-    auto_publish boolean DEFAULT false NOT NULL
+    auto_publish boolean DEFAULT false NOT NULL,
+    registration_proponent_types json,
+    registration_ranges json
 );
 
 
@@ -1745,20 +1881,6 @@ CREATE TABLE public.opportunity_meta (
 ALTER TABLE public.opportunity_meta OWNER TO mapas;
 
 --
--- Name: permission_cache_pending; Type: TABLE; Schema: public; Owner: mapas
---
-
-CREATE TABLE public.permission_cache_pending (
-    id integer NOT NULL,
-    object_id integer NOT NULL,
-    object_type character varying(255) NOT NULL,
-    status smallint DEFAULT 0
-);
-
-
-ALTER TABLE public.permission_cache_pending OWNER TO mapas;
-
---
 -- Name: permission_cache_pending_seq; Type: SEQUENCE; Schema: public; Owner: mapas
 --
 
@@ -1771,6 +1893,21 @@ CREATE SEQUENCE public.permission_cache_pending_seq
 
 
 ALTER TABLE public.permission_cache_pending_seq OWNER TO mapas;
+
+--
+-- Name: permission_cache_pending; Type: TABLE; Schema: public; Owner: mapas
+--
+
+CREATE TABLE public.permission_cache_pending (
+    id integer DEFAULT nextval('public.permission_cache_pending_seq'::regclass) NOT NULL,
+    object_id integer NOT NULL,
+    object_type character varying(255) NOT NULL,
+    status smallint DEFAULT 0,
+    usr_id integer
+);
+
+
+ALTER TABLE public.permission_cache_pending OWNER TO mapas;
 
 --
 -- Name: procuration; Type: TABLE; Schema: public; Owner: mapas
@@ -1950,7 +2087,9 @@ CREATE TABLE public.registration_field_configuration (
     config text,
     conditional boolean,
     conditional_field character varying(255),
-    conditional_value character varying(255)
+    conditional_value character varying(255),
+    registration_ranges json,
+    proponent_types json
 );
 
 
@@ -1991,7 +2130,9 @@ CREATE TABLE public.registration_file_configuration (
     display_order smallint DEFAULT 255,
     conditional boolean,
     conditional_field character varying(255),
-    conditional_value character varying(255)
+    conditional_value character varying(255),
+    registration_ranges json,
+    proponent_types json
 );
 
 
@@ -2409,20 +2550,6 @@ CREATE SEQUENCE public.subsite_id_seq
 ALTER TABLE public.subsite_id_seq OWNER TO mapas;
 
 --
--- Name: subsite_meta; Type: TABLE; Schema: public; Owner: mapas
---
-
-CREATE TABLE public.subsite_meta (
-    object_id integer NOT NULL,
-    key character varying(255) NOT NULL,
-    value text,
-    id integer NOT NULL
-);
-
-
-ALTER TABLE public.subsite_meta OWNER TO mapas;
-
---
 -- Name: subsite_meta_id_seq; Type: SEQUENCE; Schema: public; Owner: mapas
 --
 
@@ -2435,6 +2562,20 @@ CREATE SEQUENCE public.subsite_meta_id_seq
 
 
 ALTER TABLE public.subsite_meta_id_seq OWNER TO mapas;
+
+--
+-- Name: subsite_meta; Type: TABLE; Schema: public; Owner: mapas
+--
+
+CREATE TABLE public.subsite_meta (
+    object_id integer NOT NULL,
+    key character varying(255) NOT NULL,
+    value text,
+    id integer DEFAULT nextval('public.subsite_meta_id_seq'::regclass) NOT NULL
+);
+
+
+ALTER TABLE public.subsite_meta OWNER TO mapas;
 
 --
 -- Name: system_role; Type: TABLE; Schema: public; Owner: mapas
@@ -2619,6 +2760,13 @@ ALTER TABLE ONLY public._municipios ALTER COLUMN gid SET DEFAULT nextval('public
 
 
 --
+-- Name: agent_meta id; Type: DEFAULT; Schema: public; Owner: mapas
+--
+
+ALTER TABLE ONLY public.agent_meta ALTER COLUMN id SET DEFAULT nextval('public.agent_meta_id_seq'::regclass);
+
+
+--
 -- Name: agent_relation id; Type: DEFAULT; Schema: public; Owner: mapas
 --
 
@@ -2637,6 +2785,13 @@ ALTER TABLE ONLY public.evaluation_method_configuration ALTER COLUMN id SET DEFA
 --
 
 ALTER TABLE ONLY public.event ALTER COLUMN id SET DEFAULT nextval('public.event_id_seq'::regclass);
+
+
+--
+-- Name: event_meta id; Type: DEFAULT; Schema: public; Owner: mapas
+--
+
+ALTER TABLE ONLY public.event_meta ALTER COLUMN id SET DEFAULT nextval('public.event_meta_id_seq'::regclass);
 
 
 --
@@ -2675,10 +2830,24 @@ ALTER TABLE ONLY public.project_event ALTER COLUMN id SET DEFAULT nextval('publi
 
 
 --
+-- Name: project_meta id; Type: DEFAULT; Schema: public; Owner: mapas
+--
+
+ALTER TABLE ONLY public.project_meta ALTER COLUMN id SET DEFAULT nextval('public.project_meta_id_seq'::regclass);
+
+
+--
 -- Name: space id; Type: DEFAULT; Schema: public; Owner: mapas
 --
 
 ALTER TABLE ONLY public.space ALTER COLUMN id SET DEFAULT nextval('public.space_id_seq'::regclass);
+
+
+--
+-- Name: space_meta id; Type: DEFAULT; Schema: public; Owner: mapas
+--
+
+ALTER TABLE ONLY public.space_meta ALTER COLUMN id SET DEFAULT nextval('public.space_meta_id_seq'::regclass);
 
 
 --
@@ -2741,6 +2910,32 @@ COPY public.agent_meta (object_id, key, value, id) FROM stdin;
 --
 
 COPY public.agent_relation (id, agent_id, object_type, object_id, type, has_control, create_timestamp, status, metadata) FROM stdin;
+\.
+
+
+--
+-- Data for Name: blame_log; Type: TABLE DATA; Schema: public; Owner: mapas
+--
+
+COPY public.blame_log (id, request_id, action, metadata, created_at) FROM stdin;
+1	pYqpcXej3tmPJ	GET / (site.index)	{"URL":[],"GET":[]}	2025-06-13 12:25:53
+2	6AG2EK33XuoVn	GET /assets/svg/favicon.img.1mf230z.svg (site.error)	{"URL":{"code":404,"e":{}},"GET":[]}	2025-06-13 12:25:56
+3	M186RNeQDIIMI	GET / (site.index)	{"URL":[],"GET":[]}	2025-06-13 12:27:14
+4	p6fJlHKbcoaSP	GET /assets/svg/favicon.img.uhyoke.svg (site.error)	{"URL":{"code":404,"e":{}},"GET":[]}	2025-06-13 12:27:18
+5	7nlDl42EMxJFG	GET / (site.index)	{"URL":[],"GET":[]}	2025-06-13 12:27:53
+\.
+
+
+--
+-- Data for Name: blame_request; Type: TABLE DATA; Schema: public; Owner: mapas
+--
+
+COPY public.blame_request (id, ip, session_id, user_id, user_agent, user_browser_name, user_browser_version, user_os, user_device, metadata, created_at) FROM stdin;
+pYqpcXej3tmPJ	172.18.0.1	77cbcc06556e1313669c63c14f78de23	0	Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36	Chrome	136.0.0.0	Linux	unknown	{}	2025-06-13 12:25:53
+6AG2EK33XuoVn	172.18.0.1	77cbcc06556e1313669c63c14f78de23	0	Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36	Chrome	136.0.0.0	Linux	unknown	{}	2025-06-13 12:25:56
+M186RNeQDIIMI	172.18.0.1	77cbcc06556e1313669c63c14f78de23	0	Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36	Chrome	136.0.0.0	Linux	unknown	{}	2025-06-13 12:27:14
+p6fJlHKbcoaSP	172.18.0.1	77cbcc06556e1313669c63c14f78de23	0	Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36	Chrome	136.0.0.0	Linux	unknown	{}	2025-06-13 12:27:18
+7nlDl42EMxJFG	172.18.0.1	77cbcc06556e1313669c63c14f78de23	0	Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36	Chrome	136.0.0.0	Linux	unknown	{}	2025-06-13 12:27:53
 \.
 
 
@@ -2833,66 +3028,111 @@ create entities updated revision	2019-03-07 23:54:19.362878
 fix update timestamp of revisioned entities	2019-03-07 23:54:19.367904
 consolidate registration result	2019-03-07 23:54:19.3728
 create avatar thumbs	2019-03-07 23:55:16.963658
-CREATE SEQUENCE REGISTRATION SPACE RELATION registration_space_relation_id_seq	2022-12-28 15:18:39.104279
-CREATE TABLE spacerelation	2022-12-28 15:18:39.104279
-ALTER TABLE registration	2022-12-28 15:18:39.104279
-create event attendance table	2022-12-28 15:18:39.104279
-create procuration table	2022-12-28 15:18:39.104279
-alter table registration_field_configuration add column config	2022-12-28 15:18:39.104279
-recreate ALL FKs	2022-12-28 15:18:39.104279
-create object_type enum type	2022-12-28 15:18:39.104279
-create permission_action enum type	2022-12-28 15:18:39.104279
-alter tables to use enum types	2022-12-28 15:18:39.104279
-alter table permission_cache_pending add column status	2022-12-28 15:18:39.104279
-RECREATE VIEW evaluations AGAIN!	2022-12-28 15:18:39.104279
-valuer disabling refactor	2022-12-28 15:18:39.104279
-ALTER TABLE metalist ALTER value TYPE TEXT	2022-12-28 15:18:39.104279
-Add metadata to Agent Relation	2022-12-28 15:18:39.104279
-add timestamp columns to registration_evaluation	2022-12-28 15:18:39.104279
-create chat tables	2022-12-28 15:18:39.104279
-create table job	2022-12-28 15:18:39.104279
-clean existing orphans	2022-12-28 15:18:39.104279
-add triggers for orphan cleanup	2022-12-28 15:18:39.104279
-Remove lixo angular registration_meta	2022-12-28 15:18:39.104279
-Adiciona coluna avaliableEvaluationFields na tabela opportunity	2022-12-28 15:18:39.104279
-Consede permissão em todos os campo para todos os avaliadores da oportunidade	2022-12-28 15:18:39.104279
-alter seal add column locked_fields	2022-12-28 15:18:39.104279
-update taxonomy slug funcao	2022-12-28 15:18:39.104279
-create registrations history entries	2022-12-28 15:18:39.949624
-create evaluations history entries	2022-12-28 15:18:39.960974
-corrige registration_metadada dos campos @	2022-12-28 15:18:39.963793
-remove orphan events again	2023-09-16 18:51:34.531169
-fix subsite verifiedSeals array	2023-09-16 18:51:34.531169
-RECREATE VIEW evaluations AGAIN!!!!!	2023-09-16 18:51:34.531169
-adiciona oportunidades na fila de reprocessamento de cache	2023-09-16 18:51:34.531169
-adiciona novos indices a tabela agent_relation	2023-09-16 18:51:34.531169
-alter job.metadata comment	2023-09-16 18:51:34.531169
-Adiciona coluna publish_timestamp na tabela opportunity	2023-09-16 18:51:34.531169
-Adiciona coluna auto_publish na tabela opportunity	2023-09-16 18:51:34.531169
-Adiciona coluna evaluation_from e evaluation_to na tabela evaluation_method_configuration	2023-09-16 18:51:34.531169
-adiciona coluna name na tabela evaluation_method_configuration	2023-09-16 18:51:34.531169
-popula as colunas name, evaluation_from e evaluation_to da tabela evaluation_method_configuration	2023-09-16 18:51:34.531169
-Renomeia colunas registrationFrom e registrationTo da tabela de projetod	2023-09-16 18:51:34.531169
-Adiciona novas coluna na tabela registration_field_configuration	2023-09-16 18:51:34.531169
-Adiciona novas coluna na tabela registration_file_configuration	2023-09-16 18:51:34.531169
-corrige metadados criados por erro em inscricoes de fases	2023-09-16 18:51:34.531169
-Adiciona a coluna description para a descrição da ocorrência	2023-09-16 18:51:34.531169
-Adiciona a coluna price para a o valor de entrada da ocorrência	2023-09-16 18:51:34.531169
-Adiciona a coluna priceInfo para a informações sobre o valor de entrada da ocorrência	2023-09-16 18:51:34.531169
-Apaga registro do db-update de "Definição dos cammpos cpf e cnpj com base no documento" para que rode novamente	2023-09-16 18:51:34.531169
-Corrige config dos campos na entidade registration_fields_configurarion	2023-09-16 18:51:34.531169
-seta como vazio campo escolaridade do agent caso esteja com valor não informado	2023-09-16 18:51:34.531169
-altera tipo da coluna description na tabela file	2023-09-16 18:51:34.531169
-faz com que o updateTimestamp seja igual ao createTimestamp na criacão da entidade	2023-09-16 18:51:34.531169
-migra valores das colunas do tipo array para do tipo json	2023-09-16 18:51:34.531169
-define metadado isDataCollection = 0 nas fases sem campos configurados	2023-09-16 18:51:34.531169
-create table system_role	2023-09-16 18:51:34.531169
-alter system_role.permissions comment	2023-09-16 18:51:34.531169
-Definição dos cammpos cpf e cnpj com base no documento	2023-09-16 18:51:35.638149
-Atualiza os campos das ocorrencias para o novo padrao	2023-09-16 18:51:35.644497
-create permission cache for users	2023-09-16 18:51:35.648676
-Atualiza campos condicionados para funcionar na nova estrutura	2023-09-16 18:51:35.653105
-criando fases de resultado final para as oportunidades existentes sem fase final	2023-09-16 18:51:35.657056
+CREATE SEQUENCE REGISTRATION SPACE RELATION registration_space_relation_id_seq	2021-02-04 13:50:37.698794
+CREATE TABLE spacerelation	2021-02-04 13:50:37.698794
+ALTER TABLE registration	2021-02-04 13:50:37.698794
+create event attendance table	2021-02-04 13:50:37.698794
+create procuration table	2021-02-04 13:50:37.698794
+alter table registration_field_configuration add column config	2021-02-04 13:50:37.698794
+recreate ALL FKs	2021-02-04 13:50:37.698794
+create object_type enum type	2021-02-04 13:50:37.698794
+create permission_action enum type	2021-02-04 13:50:37.698794
+alter tables to use enum types	2021-02-04 13:50:37.698794
+alter table permission_cache_pending add column status	2021-02-04 13:50:37.698794
+CREATE VIEW evaluation	2021-02-04 13:50:37.698794
+valuer disabling refactor	2021-02-04 13:50:37.698794
+ALTER TABLE metalist ALTER value TYPE TEXT	2025-06-13 15:07:20.401263
+Add metadata to Agent Relation	2025-06-13 15:07:20.42411
+add timestamp columns to registration_evaluation	2025-06-13 15:07:20.440782
+create chat tables	2025-06-13 15:07:20.52799
+create table job	2025-06-13 15:07:20.56536
+alter job.metadata comment	2025-06-13 15:07:20.573484
+Adiciona coluna avaliableEvaluationFields na tabela opportunity	2025-06-13 15:07:20.585178
+Adiciona coluna publish_timestamp na tabela opportunity	2025-06-13 15:07:20.597337
+Adiciona coluna auto_publish na tabela opportunity	2025-06-13 15:07:20.610747
+Adiciona coluna evaluation_from e evaluation_to na tabela evaluation_method_configuration	2025-06-13 15:07:20.62916
+adiciona coluna name na tabela evaluation_method_configuration	2025-06-13 15:07:20.64669
+Renomeia colunas registrationFrom e registrationTo da tabela de projetod	2025-06-13 15:07:20.668516
+Adiciona novas coluna na tabela registration_field_configuration	2025-06-13 15:07:20.685258
+Adiciona novas coluna na tabela registration_file_configuration	2025-06-13 15:07:20.699982
+alter seal add column locked_fields	2025-06-13 15:07:20.710104
+Adiciona a coluna description para a descrição da ocorrência	2025-06-13 15:07:20.721254
+Adiciona a coluna price para a o valor de entrada da ocorrência	2025-06-13 15:07:20.731809
+Adiciona a coluna priceInfo para a informações sobre o valor de entrada da ocorrência	2025-06-13 15:07:20.741899
+Cria colunas proponent_type e registration na tabela registration	2025-06-13 15:07:20.757494
+Cria colunas registration_proponent_types e registration_ranges na tabela opportunity	2025-06-13 15:07:20.773295
+Cria colunas registration_ranges e proponent_types na tabela registration_field_configuration	2025-06-13 15:07:20.78836
+Cria colunas registration_ranges e proponent_types na tabela registration_file_configuration	2025-06-13 15:07:20.810794
+Cria colunas score e eligible na entidade Registration - correcao	2025-06-13 15:07:20.828757
+Adiciona as colunas subsite_id e user_id à tabela job	2025-06-13 15:07:20.841479
+Cria coluna send_timestamp para registrar o envio das avaliações	2025-06-13 15:07:20.851883
+Define os valores da nova coluna sent_timestamp na tabela de avaliações	2025-06-13 15:07:20.859717
+Cria colunas editableUntil editSentTimestamp e editableFields na tabela registration	2025-06-13 15:07:20.881138
+create table system_role	2025-06-13 15:07:20.906881
+alter system_role.permissions comment	2025-06-13 15:07:20.916188
+Corrige constraint enforce_geotype_geom da tabela geo_division	2025-06-13 15:07:20.937619
+cria funções para o cast automático de ponto para varchar	2025-06-13 15:07:20.955666
+remove orphan events again	2025-06-13 15:07:20.96099
+fix subsite verifiedSeals array	2025-06-13 15:07:20.974258
+DROP VIEW evaluations	2025-06-13 15:07:20.983854
+RECREATE MATERIALIZED VIEW evaluations	2025-06-13 15:07:21.003292
+adiciona oportunidades na fila de reprocessamento de cache	2025-06-13 15:07:21.016212
+adiciona novos indices a tabela agent_relation	2025-06-13 15:07:21.082039
+clean existing orphans	2025-06-13 15:07:21.099477
+add triggers for orphan cleanup	2025-06-13 15:07:21.151603
+Remove lixo angular registration_meta	2025-06-13 15:07:21.155943
+popula as colunas name, evaluation_from e evaluation_to da tabela evaluation_method_configuration	2025-06-13 15:07:21.16042
+Ajusta as colunas registration_proponent_types, registration_ranges e registration_categories das oportuniodades para setar um array vazio quando as mesmas estiverem null	2025-06-13 15:07:21.165272
+Consede permissão em todos os campo para todos os avaliadores da oportunidade	2025-06-13 15:07:21.169646
+corrige metadados criados por erro em inscricoes de fases	2025-06-13 15:07:21.174106
+Apaga registro do db-update de "Definição dos cammpos cpf e cnpj com base no documento" para que rode novamente	2025-06-13 15:07:21.17833
+Corrige config dos campos na entidade registration_fields_configurarion	2025-06-13 15:07:21.183275
+seta como vazio campo escolaridade do agent caso esteja com valor não informado	2025-06-13 15:07:21.187778
+altera tipo da coluna description na tabela file	2025-06-13 15:07:21.196683
+faz com que o updateTimestamp seja igual ao createTimestamp na criacão da entidade	2025-06-13 15:07:21.202928
+migra valores das colunas do tipo array para do tipo json	2025-06-13 15:07:21.2078
+corrige permissão de avaliadores que tem avaliação mas não possui permissão de avaliar pela regra configurada	2025-06-13 15:07:21.214424
+adiciona coluna user_id à tabela pending_permission_cache	2025-06-13 15:07:21.224536
+limpeza da tabela de pcache	2025-06-13 15:07:21.229955
+create trigger to update children opportunities	2025-06-13 15:07:21.244848
+recreate trigger to insert opportunity data to new children	2025-06-13 15:07:21.256954
+renomeia metadados da funcionalidade AffirmativePollices	2025-06-13 15:07:21.262781
+corrige os valores da distribuição de avaliação por categorias - correção	2025-06-13 15:07:21.267643
+adiciona índices nas tabelas de revisões de entidades	2025-06-13 15:07:21.328679
+adiciona índice para a coluna action da tabela pcache	2025-06-13 15:07:21.340969
+adiciona novos índices na tabela registration	2025-06-13 15:07:21.400016
+adiciona novos índices na tabela file	2025-06-13 15:07:21.420109
+deleta requests com valores dos da coluna metadata inválidos	2025-06-13 15:07:21.42468
+Limpa entradas duplicadas na tabela pcache e cria novos indices	2025-06-13 15:07:21.437181
+Atualiza coluna parent_id do agente com id do agente principal	2025-06-13 15:07:21.444962
+Apaga entradas duplicadas na tabela de avaliação e cria indice unique para a avaliação vs avaliador	2025-06-13 15:07:21.457029
+cria novos índices em diversas tabelas 	2025-06-13 15:07:21.549471
+define valores default para as colunas ids das tabelas sem default	2025-06-13 15:07:21.584113
+refatoração dos índices da tabela pcache	2025-06-13 15:07:21.601067
+remove entradas da tabela pcache não mais utilizadas	2025-06-13 15:07:21.606618
+update taxonomy slug funcao	2025-06-13 15:07:21.613089
+define metadado isDataCollection = 0 nas fases sem campos configurados	2025-06-13 15:07:21.618778
+create table blame tables	2025-06-13 15:07:21.9343
+alter table blame_log action size	2025-06-13 15:07:21.944991
+alter table blame_request columns length again	2025-06-13 15:07:21.974552
+create view blame	2025-06-13 15:07:21.984827
+Aumenta tamanho da coluna IP na tabela blame_request	2025-06-13 15:07:22.038328
+create registrations history entries	2025-06-13 15:07:22.499513
+create evaluations history entries	2025-06-13 15:07:22.511478
+corrige registration_metadada dos campos @	2025-06-13 15:07:22.519017
+Definição dos cammpos cpf e cnpj com base no documento	2025-06-13 15:07:22.524485
+Atualiza os campos das ocorrencias para o novo padrao	2025-06-13 15:07:22.529645
+create permission cache for users	2025-06-13 15:07:22.534074
+Atualiza campos condicionados para funcionar na nova estrutura	2025-06-13 15:07:22.537923
+corrige campos arroba	2025-06-13 15:07:22.544859
+Padronização dos campos de rede social	2025-06-13 15:07:22.552918
+create opportunities history entries	2025-06-13 15:07:22.561566
+sync last opportunity phases registrations	2025-06-13 15:07:22.570444
+Atualiza campo pessoa idosa	2025-06-13 15:07:22.575392
+Reordena campo pessoa deficiente dos agentes	2025-06-13 15:07:22.580274
+Reordena campo pessoa deficiente das inscrições	2025-06-13 15:07:22.585873
+garante que os avaliadores dos editais sejam sempre os agentes principais de perfis	2025-06-13 15:07:22.590605
+criando fases de resultado final para as oportunidades existentes sem fase final	2025-06-13 15:07:22.595234
 \.
 
 
@@ -3025,7 +3265,8 @@ COPY public.geo_division (id, parent_id, type, cod, name, geom) FROM stdin;
 -- Data for Name: job; Type: TABLE DATA; Schema: public; Owner: mapas
 --
 
-COPY public.job (id, name, iterations, iterations_count, interval_string, create_timestamp, next_execution_timestamp, last_execution_timestamp, metadata, status) FROM stdin;
+COPY public.job (id, name, iterations, iterations_count, interval_string, create_timestamp, next_execution_timestamp, last_execution_timestamp, metadata, status, subsite_id, user_id) FROM stdin;
+286993a4b9c59e612a6c86af8801293a	RefreshViewEvaluations	5256000	3	1 minute	2025-06-13 12:28:05	2025-06-13 12:31:05	2025-06-13 12:30:05	[]	0	\N	\N
 \.
 
 
@@ -3065,7 +3306,7 @@ COPY public.notification_meta (id, object_id, key, value) FROM stdin;
 -- Data for Name: opportunity; Type: TABLE DATA; Schema: public; Owner: mapas
 --
 
-COPY public.opportunity (id, parent_id, agent_id, type, name, short_description, long_description, registration_from, registration_to, published_registrations, registration_categories, create_timestamp, update_timestamp, status, subsite_id, object_type, object_id, avaliable_evaluation_fields, publish_timestamp, auto_publish) FROM stdin;
+COPY public.opportunity (id, parent_id, agent_id, type, name, short_description, long_description, registration_from, registration_to, published_registrations, registration_categories, create_timestamp, update_timestamp, status, subsite_id, object_type, object_id, avaliable_evaluation_fields, publish_timestamp, auto_publish, registration_proponent_types, registration_ranges) FROM stdin;
 \.
 
 
@@ -3089,7 +3330,7 @@ COPY public.pcache (id, user_id, action, create_timestamp, object_type, object_i
 -- Data for Name: permission_cache_pending; Type: TABLE DATA; Schema: public; Owner: mapas
 --
 
-COPY public.permission_cache_pending (id, object_id, object_type, status) FROM stdin;
+COPY public.permission_cache_pending (id, object_id, object_type, status, usr_id) FROM stdin;
 \.
 
 
@@ -3129,7 +3370,7 @@ COPY public.project_meta (object_id, key, value, id) FROM stdin;
 -- Data for Name: registration; Type: TABLE DATA; Schema: public; Owner: mapas
 --
 
-COPY public.registration (id, opportunity_id, category, agent_id, create_timestamp, sent_timestamp, status, agents_data, subsite_id, consolidated_result, number, valuers_exceptions_list, space_data) FROM stdin;
+COPY public.registration (id, opportunity_id, category, agent_id, create_timestamp, sent_timestamp, status, agents_data, subsite_id, consolidated_result, number, valuers_exceptions_list, space_data, proponent_type, range, score, eligible, editable_until, edit_sent_timestamp, editable_fields) FROM stdin;
 \.
 
 
@@ -3137,7 +3378,7 @@ COPY public.registration (id, opportunity_id, category, agent_id, create_timesta
 -- Data for Name: registration_evaluation; Type: TABLE DATA; Schema: public; Owner: mapas
 --
 
-COPY public.registration_evaluation (id, registration_id, user_id, result, evaluation_data, status, create_timestamp, update_timestamp) FROM stdin;
+COPY public.registration_evaluation (id, registration_id, user_id, result, evaluation_data, status, create_timestamp, update_timestamp, sent_timestamp) FROM stdin;
 \.
 
 
@@ -3145,7 +3386,7 @@ COPY public.registration_evaluation (id, registration_id, user_id, result, evalu
 -- Data for Name: registration_field_configuration; Type: TABLE DATA; Schema: public; Owner: mapas
 --
 
-COPY public.registration_field_configuration (id, opportunity_id, title, description, categories, required, field_type, field_options, max_size, display_order, config, conditional, conditional_field, conditional_value) FROM stdin;
+COPY public.registration_field_configuration (id, opportunity_id, title, description, categories, required, field_type, field_options, max_size, display_order, config, conditional, conditional_field, conditional_value, registration_ranges, proponent_types) FROM stdin;
 \.
 
 
@@ -3153,7 +3394,7 @@ COPY public.registration_field_configuration (id, opportunity_id, title, descrip
 -- Data for Name: registration_file_configuration; Type: TABLE DATA; Schema: public; Owner: mapas
 --
 
-COPY public.registration_file_configuration (id, opportunity_id, title, description, required, categories, display_order, conditional, conditional_field, conditional_value) FROM stdin;
+COPY public.registration_file_configuration (id, opportunity_id, title, description, required, categories, display_order, conditional, conditional_field, conditional_value, registration_ranges, proponent_types) FROM stdin;
 \.
 
 
@@ -3394,6 +3635,13 @@ SELECT pg_catalog.setval('public.agent_meta_id_seq', 1, false);
 --
 
 SELECT pg_catalog.setval('public.agent_relation_id_seq', 1, false);
+
+
+--
+-- Name: blame_log_id_seq; Type: SEQUENCE SET; Schema: public; Owner: mapas
+--
+
+SELECT pg_catalog.setval('public.blame_log_id_seq', 5, true);
 
 
 --
@@ -3771,6 +4019,22 @@ ALTER TABLE ONLY public.agent
 
 ALTER TABLE ONLY public.agent_relation
     ADD CONSTRAINT agent_relation_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: blame_log blame_log_pkey; Type: CONSTRAINT; Schema: public; Owner: mapas
+--
+
+ALTER TABLE ONLY public.blame_log
+    ADD CONSTRAINT blame_log_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: blame_request blame_request_pkey; Type: CONSTRAINT; Schema: public; Owner: mapas
+--
+
+ALTER TABLE ONLY public.blame_request
+    ADD CONSTRAINT blame_request_pkey PRIMARY KEY (id);
 
 
 --
@@ -4244,6 +4508,55 @@ CREATE INDEX alias_url_index ON public.subsite USING btree (alias_url);
 
 
 --
+-- Name: entity_revision_data_id; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX entity_revision_data_id ON public.entity_revision_data USING btree (id);
+
+
+--
+-- Name: entity_revision_data_key; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX entity_revision_data_key ON public.entity_revision_data USING btree (key);
+
+
+--
+-- Name: entity_revision_object; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX entity_revision_object ON public.entity_revision USING btree (object_type, object_id);
+
+
+--
+-- Name: entity_revision_object_id; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX entity_revision_object_id ON public.entity_revision USING btree (object_id);
+
+
+--
+-- Name: entity_revision_object_type; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX entity_revision_object_type ON public.entity_revision USING btree (object_type);
+
+
+--
+-- Name: entity_revision_revision_data_data_id; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX entity_revision_revision_data_data_id ON public.entity_revision_revision_data USING btree (revision_data_id);
+
+
+--
+-- Name: entity_revision_revision_data_revision_id; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX entity_revision_revision_data_revision_id ON public.entity_revision_revision_data USING btree (revision_id);
+
+
+--
 -- Name: evaluationmethodconfiguration_meta_owner_idx; Type: INDEX; Schema: public; Owner: mapas
 --
 
@@ -4314,10 +4627,31 @@ CREATE INDEX file_owner_index ON public.file USING btree (object_type, object_id
 
 
 --
+-- Name: file_parent_idx; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX file_parent_idx ON public.file USING btree (parent_id);
+
+
+--
+-- Name: file_parent_object_type_idx; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX file_parent_object_type_idx ON public.file USING btree (parent_id, object_type);
+
+
+--
 -- Name: geo_divisions_geom_idx; Type: INDEX; Schema: public; Owner: mapas
 --
 
 CREATE INDEX geo_divisions_geom_idx ON public.geo_division USING gist (geom);
+
+
+--
+-- Name: id_agent_relation_agent; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX id_agent_relation_agent ON public.agent_relation USING btree (agent_id);
 
 
 --
@@ -4482,6 +4816,76 @@ CREATE INDEX idx_62a8a7a7c79c849a ON public.registration USING btree (subsite_id
 
 
 --
+-- Name: idx_agent_usr; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_agent_usr ON public.agent USING btree (user_id);
+
+
+--
+-- Name: idx_blame_log__action; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_blame_log__action ON public.blame_log USING btree (action);
+
+
+--
+-- Name: idx_blame_log__created_at; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_blame_log__created_at ON public.blame_log USING btree (created_at);
+
+
+--
+-- Name: idx_blame_log__ip; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_blame_log__ip ON public.blame_request USING btree (ip);
+
+
+--
+-- Name: idx_blame_request__session_id; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_blame_request__session_id ON public.blame_request USING btree (session_id);
+
+
+--
+-- Name: idx_blame_request__user_browser_name; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_blame_request__user_browser_name ON public.blame_request USING btree (user_browser_name);
+
+
+--
+-- Name: idx_blame_request__user_device; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_blame_request__user_device ON public.blame_request USING btree (user_device);
+
+
+--
+-- Name: idx_blame_request__user_id; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_blame_request__user_id ON public.blame_request USING btree (user_id);
+
+
+--
+-- Name: idx_blame_request__user_os; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_blame_request__user_os ON public.blame_request USING btree (user_os);
+
+
+--
+-- Name: idx_event_agent_id; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_event_agent_id ON public.event USING btree (agent_id);
+
+
+--
 -- Name: idx_fab3fc16727aca70; Type: INDEX; Schema: public; Owner: mapas
 --
 
@@ -4500,6 +4904,69 @@ CREATE INDEX idx_fab3fc16a76ed395 ON public.chat_message USING btree (user_id);
 --
 
 CREATE INDEX idx_fab3fc16c47d5262 ON public.chat_message USING btree (chat_thread_id);
+
+
+--
+-- Name: idx_opportunity_meta_key; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_opportunity_meta_key ON public.registration_meta USING btree (key);
+
+
+--
+-- Name: idx_project_agent_id; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_project_agent_id ON public.project USING btree (agent_id);
+
+
+--
+-- Name: idx_project_type; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_project_type ON public.project USING btree (type);
+
+
+--
+-- Name: idx_registration_meta_key; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_registration_meta_key ON public.registration_meta USING btree (key);
+
+
+--
+-- Name: idx_seal_relation_agent_id; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_seal_relation_agent_id ON public.seal_relation USING btree (agent_id);
+
+
+--
+-- Name: idx_seal_relation_object; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_seal_relation_object ON public.seal_relation USING btree (object_type, object_id);
+
+
+--
+-- Name: idx_seal_relation_owner_id; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_seal_relation_owner_id ON public.seal_relation USING btree (owner_id);
+
+
+--
+-- Name: idx_space_agent_id; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_space_agent_id ON public.space USING btree (agent_id);
+
+
+--
+-- Name: idx_usr_profile; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX idx_usr_profile ON public.usr USING btree (profile_id);
 
 
 --
@@ -4580,6 +5047,20 @@ CREATE INDEX owner_index ON public.term_relation USING btree (object_type, objec
 
 
 --
+-- Name: pcache_action_idx; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX pcache_action_idx ON public.pcache USING btree (action);
+
+
+--
+-- Name: pcache_object_user_action_idx; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX pcache_object_user_action_idx ON public.pcache USING btree (user_id, object_type, action);
+
+
+--
 -- Name: pcache_owner_idx; Type: INDEX; Schema: public; Owner: mapas
 --
 
@@ -4591,13 +5072,6 @@ CREATE INDEX pcache_owner_idx ON public.pcache USING btree (object_type, object_
 --
 
 CREATE INDEX pcache_permission_idx ON public.pcache USING btree (object_type, object_id, action);
-
-
---
--- Name: pcache_permission_user_idx; Type: INDEX; Schema: public; Owner: mapas
---
-
-CREATE INDEX pcache_permission_user_idx ON public.pcache USING btree (object_type, object_id, action, user_id);
 
 
 --
@@ -4636,6 +5110,20 @@ CREATE INDEX project_meta_owner_key_idx ON public.project_meta USING btree (obje
 
 
 --
+-- Name: registration_category_idx; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX registration_category_idx ON public.registration USING btree (category);
+
+
+--
+-- Name: registration_eligible_idx; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX registration_eligible_idx ON public.registration USING btree (eligible);
+
+
+--
 -- Name: registration_meta_owner_idx; Type: INDEX; Schema: public; Owner: mapas
 --
 
@@ -4647,6 +5135,41 @@ CREATE INDEX registration_meta_owner_idx ON public.registration_meta USING btree
 --
 
 CREATE INDEX registration_meta_owner_key_idx ON public.registration_meta USING btree (object_id, key);
+
+
+--
+-- Name: registration_number_idx; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX registration_number_idx ON public.registration USING btree (number);
+
+
+--
+-- Name: registration_proponent_type_idx; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX registration_proponent_type_idx ON public.registration USING btree (proponent_type);
+
+
+--
+-- Name: registration_range_idx; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX registration_range_idx ON public.registration USING btree (range);
+
+
+--
+-- Name: registration_score_idx; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX registration_score_idx ON public.registration USING btree (score);
+
+
+--
+-- Name: registration_status_idx; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE INDEX registration_status_idx ON public.registration USING btree (status);
 
 
 --
@@ -4752,6 +5275,20 @@ CREATE UNIQUE INDEX taxonomy_term_unique ON public.term USING btree (taxonomy, t
 --
 
 CREATE UNIQUE INDEX uniq_330cb54c9a34590f ON public.evaluation_method_configuration USING btree (opportunity_id);
+
+
+--
+-- Name: unique_evaluation_user_id; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE UNIQUE INDEX unique_evaluation_user_id ON public.registration_evaluation USING btree (registration_id, user_id);
+
+
+--
+-- Name: unique_object_action; Type: INDEX; Schema: public; Owner: mapas
+--
+
+CREATE UNIQUE INDEX unique_object_action ON public.pcache USING btree (object_type, object_id, action, user_id);
 
 
 --
@@ -4864,6 +5401,20 @@ CREATE TRIGGER trigger_clean_orphans_space AFTER DELETE ON public.space FOR EACH
 --
 
 CREATE TRIGGER trigger_clean_orphans_subsite AFTER DELETE ON public.subsite FOR EACH ROW EXECUTE FUNCTION public.fn_clean_orphans('MapasCulturais\Entities\Subsite');
+
+
+--
+-- Name: opportunity trigger_propagate_opportunity_insert; Type: TRIGGER; Schema: public; Owner: mapas
+--
+
+CREATE TRIGGER trigger_propagate_opportunity_insert BEFORE INSERT ON public.opportunity FOR EACH ROW EXECUTE FUNCTION public.fn_propagate_opportunity_insert();
+
+
+--
+-- Name: opportunity trigger_propagate_opportunity_update; Type: TRIGGER; Schema: public; Owner: mapas
+--
+
+CREATE TRIGGER trigger_propagate_opportunity_update AFTER UPDATE ON public.opportunity FOR EACH ROW EXECUTE FUNCTION public.fn_propagate_opportunity_update();
 
 
 --
@@ -5323,6 +5874,14 @@ ALTER TABLE ONLY public.notification
 
 
 --
+-- Name: blame_log fk_blame_log_request; Type: FK CONSTRAINT; Schema: public; Owner: mapas
+--
+
+ALTER TABLE ONLY public.blame_log
+    ADD CONSTRAINT fk_blame_log_request FOREIGN KEY (request_id) REFERENCES public.blame_request(id) ON DELETE CASCADE;
+
+
+--
 -- Name: event_meta fk_c839589e232d562b; Type: FK CONSTRAINT; Schema: public; Owner: mapas
 --
 
@@ -5416,6 +5975,13 @@ ALTER TABLE ONLY public.chat_message
 
 ALTER TABLE ONLY public.chat_message
     ADD CONSTRAINT fk_fab3fc16c47d5262 FOREIGN KEY (chat_thread_id) REFERENCES public.chat_thread(id) ON DELETE CASCADE;
+
+
+--
+-- Name: evaluations; Type: MATERIALIZED VIEW DATA; Schema: public; Owner: mapas
+--
+
+REFRESH MATERIALIZED VIEW public.evaluations;
 
 
 --
