@@ -21,8 +21,11 @@ return [
 
     ex: `img/meu-mapa-logo.jpg` (pasta assets/img/meu-mapa-logo.jpg do tema) 
     */
-    'logo.image' => env('LOGO_IMAGE', ''),
+    'logo.image' => env('LOGO_IMAGE', 'img/logo-site.png'),
 
     /* Esconde o título e subtitulo */
-    'logo.hideLabel' => env('LOGO_HIDELABEL', false),
+    /*'logo.hideLabel' => env('LOGO_HIDELABEL', false),
+
+    /* Esconde o título e subtitulo */
+    'logo.hideLabel' => true,
 ];
