@@ -16,6 +16,7 @@ services:
       - ./docker-data/private-files:/var/www/var/private-files
       - ./docker-data/logs:/var/www/var/logs
 
+      - ../docker/common/lgpd-terms:/var/www/config/lgpd-terms
       - ../docker/common/config.d:/var/www/config/common.d
       - ./config.d:/var/www/config/local.d
 
