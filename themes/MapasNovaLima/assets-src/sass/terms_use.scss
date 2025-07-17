@@ -1,0 +1,35 @@
+
+.container-terms {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 1em;
+}
+
+.container-terms li {
+    text-align: justify;
+    line-height: 1.6;
+}
+
+.no-indent {
+    margin-left: 0;
+    padding-left: 0;
+    list-style-position: inside;
+}
+
+.indented {
+    text-indent: 40px;
+}
+
+.align-to-title,
+.align-to-title > ol,
+.align-to-title > ol > li,
+.align-to-title > ol > li > ol,
+.align-to-title > ol > li > ol > li {
+    margin-left: 0;
+    padding-left: 0;
+    list-style-position: inside;
+}
+
+.contact-us-block {
+    margin: 10px;             
+}
