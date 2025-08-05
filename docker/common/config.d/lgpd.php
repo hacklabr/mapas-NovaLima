@@ -14,5 +14,10 @@ return [
             'text'=> file_get_contents(__DIR__ . '/lgpd-terms/privacy-policy.html'),
             'buttonText' => i::__('Aceito as políticas de privacidade')
         ],
+        'termsUse' => [
+            'title'=>  'Autorização de uso de imagem',
+            'text'=> file_get_contents(__DIR__ . '/lgpd-terms/images-use.html'),
+            'buttonText' => i::__('Autorização de uso de imagem')
+        ],
     ]
 ];
