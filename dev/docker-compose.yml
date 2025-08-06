@@ -29,6 +29,7 @@ services:
       - ../plugins/Accessibility:/var/www/src/plugins/Accessibility
       - ../plugins/SpamDetector:/var/www/src/plugins/SpamDetector
       - ../plugins/MapasBlame:/var/www/src/plugins/MapasBlame
+      - ../plugins/Zammad:/var/www/src/plugins/Zammad
 
     environment:
       - PENDING_PCACHE_RECREATION_INTERVAL=10
