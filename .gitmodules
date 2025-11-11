@@ -19,3 +19,6 @@
 [submodule "plugins/Zammad"]
 	path = plugins/Zammad
 	url = https://github.com/mapasculturais/plugin-Zammad.git
+[submodule "plugins/CommitteeDraw"]
+	path = plugins/CommitteeDraw
+	url = https://github.com/mapasculturais/plugin-CommitteeDraw.git

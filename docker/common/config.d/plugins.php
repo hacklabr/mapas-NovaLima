@@ -8,6 +8,7 @@ return [
         'AdminLoginAsUser',
         'Accessibility',
         'SpamDetector',
+        'CommitteeDraw',
         'Zammad' => [
             'namespace' => 'Zammad',
             'config' => [
