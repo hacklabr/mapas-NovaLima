@@ -30,6 +30,7 @@ services:
       - ../plugins/SpamDetector:/var/www/src/plugins/SpamDetector
       - ../plugins/MapasBlame:/var/www/src/plugins/MapasBlame
       - ../plugins/Zammad:/var/www/src/plugins/Zammad
+      - ../plugins/CommitteeDraw:/var/www/src/plugins/CommitteeDraw
 
     environment:
       - PENDING_PCACHE_RECREATION_INTERVAL=10
