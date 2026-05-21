@@ -31,6 +31,7 @@ services:
       - ../plugins/MapasBlame:/var/www/src/plugins/MapasBlame
       - ../plugins/Zammad:/var/www/src/plugins/Zammad
       - ../plugins/CommitteeDraw:/var/www/src/plugins/CommitteeDraw
+      - ../plugins/ValuersManagement:/var/www/src/plugins/ValuersManagement
 
     environment:
       - PENDING_PCACHE_RECREATION_INTERVAL=10

@@ -9,6 +9,7 @@ return [
         'Accessibility',
         'SpamDetector',
         'CommitteeDraw',
+        'ValuersManagement',
         'Zammad' => [
             'namespace' => 'Zammad',
             'config' => [

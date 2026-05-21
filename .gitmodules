@@ -22,3 +22,6 @@
 [submodule "plugins/CommitteeDraw"]
 	path = plugins/CommitteeDraw
 	url = https://github.com/mapasculturais/plugin-CommitteeDraw.git
+[submodule "plugins/ValuersManagement"]
+	path = plugins/ValuersManagement
+	url = https://github.com/mapasculturais/plugin-ValuersManagement.git
