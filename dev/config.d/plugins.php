@@ -7,6 +7,7 @@ return [
         'Analytics',
         'AdminLoginAsUser',
         'Accessibility',
+        'ValuersManagement',
         'SpamDetector',
         'Zammad' => [
             'namespace' => 'Zammad',
