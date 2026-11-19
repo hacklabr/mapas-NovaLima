@@ -10,6 +10,7 @@ return [
         'SpamDetector',
         'CommitteeDraw',
         'ValuersManagement',
+        'ConectaEnte',
         'Zammad' => [
             'namespace' => 'Zammad',
             'config' => [
